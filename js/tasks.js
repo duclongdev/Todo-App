@@ -1,4 +1,5 @@
 // tasks.js — Bảng Kanban: cột tùy chỉnh, tìm kiếm, thời gian hoàn thành
+// (Đã thêm: việc con + liên kết mục tiêu)
 (function () {
   const { el } = U;
   let query = "";
@@ -23,6 +24,73 @@
     return U.fmtMinutes(Math.max(0, ms) / 60000);
   }
 
+  // Tiện ích: lấy tên cột từ ID (dùng chung)
+  function columnName(id) {
+    const cols = Store.get("taskColumns");
+    const c = cols.find((x) => x.id === id);
+    return c ? c.name : (id ? "(cột đã xóa)" : "Tạo mới");
+  }
+
+  // Tìm mục tiêu chứa taskId (nếu có)
+  function getTaskGoal(taskId) {
+    const goals = Store.get("goals") || [];
+    for (let g of goals) {
+      if ((g.subtasks || []).some((s) => s.taskId === taskId)) return g;
+    }
+    return null;
+  }
+
+  const SCOPE_LABEL = { day: "Ngày", week: "Tuần", month: "Tháng", year: "Năm" };
+
+  // Hộp thoại chọn mục tiêu để liên kết
+  function pickGoal(task, onDone) {
+    const goals = Store.get("goals") || [];
+    if (!goals.length) { U.toast("Chưa có mục tiêu nào. Hãy tạo ở tab Mục tiêu.", "err"); return; }
+    const search = el("input", { class: "input", placeholder: "🔍 Tìm mục tiêu..." });
+    const list = el("ul", { class: "list" });
+    const modal = U.modal({ title: "Liên kết công việc vào mục tiêu", body: el("div", {}, [search, list]) });
+
+    function draw() {
+      const q = search.value.trim().toLowerCase();
+      list.innerHTML = "";
+      const rows = goals.filter((g) => !q || g.title.toLowerCase().includes(q));
+      if (!rows.length) { list.append(el("p", { class: "empty", text: "Không tìm thấy mục tiêu." })); return; }
+      rows.forEach((g) => {
+        const item = el("li", { class: "item item--clickable" }, [
+          el("span", { class: "picker__icon", text: "🎯" }),
+          el("div", { class: "item__body item__body--min" }, [
+            el("div", { class: "item__text", text: g.title }),
+            el("div", { class: "item__sub", text: (SCOPE_LABEL[g.scope] || g.scope) + " · " + (g.subtasks || []).length + " việc con" }),
+          ]),
+        ]);
+        item.addEventListener("click", () => {
+          modal.close();
+          if ((g.subtasks || []).some((s) => s.taskId === task.id)) {
+            U.toast("Đã liên kết với mục tiêu này rồi", "err");
+            return;
+          }
+          Store.update((d) => {
+            const gg = d.goals.find((x) => x.id === g.id);
+            const t = d.todos.find((x) => x.id === task.id);
+            if (gg) (gg.subtasks = gg.subtasks || []).push({
+              id: U.uid(),
+              text: t ? t.text : task.text,
+              done: t ? t.done : false,
+              taskId: task.id
+            });
+          });
+          App.log("goal_subtask_add", "Liên kết công việc vào mục tiêu: " + task.text);
+          U.toast("Đã liên kết với mục tiêu");
+          onDone();
+        });
+        list.append(item);
+      });
+    }
+    search.addEventListener("input", draw);
+    draw();
+    setTimeout(() => search.focus(), 50);
+  }
+
   function isDoneCol(colId) {
     const c = Store.get("taskColumns").find((x) => x.id === colId);
     return !!(c && c.isDone);
@@ -44,6 +112,7 @@
     }
   }
 
+  // ========== POPUP CHI TIẾT CÔNG VIỆC (ĐÃ MỞ RỘNG) ==========
   function openDetail(task, root) {
     const cols = Store.get("taskColumns");
     const text = el("input", { class: "input", value: task.text, maxlength: "200" });
@@ -57,6 +126,7 @@
     const colSel = el("select", { class: "select" }, cols.map((c) => el("option", { value: c.id, text: c.name, selected: c.id === task.columnId })));
     colSel.value = task.columnId;
 
+    // Mốc thời gian
     const infoLines = [el("div", { text: "🗓️ Tạo: " + new Date(task.createdAt).toLocaleString("vi-VN") })];
     if (task.startedAt) infoLines.push(el("div", { text: "▶ Bắt đầu làm: " + new Date(task.startedAt).toLocaleString("vi-VN") }));
     if (task.completedAt) infoLines.push(el("div", { text: "✓ Hoàn thành: " + new Date(task.completedAt).toLocaleString("vi-VN") }));
@@ -65,7 +135,6 @@
     const info = el("div", { class: "stat__sub", style: "line-height:1.7" }, infoLines);
 
     // Lịch sử mọi lần đổi trạng thái
-    const colName = (id) => { const c = cols.find((x) => x.id === id); return c ? c.name : (id ? "(cột đã xóa)" : "Tạo mới"); };
     const hist = task.history || [];
     const histEl = el("div", { class: "stat__sub", style: "margin-top:10px;line-height:1.7" }, [
       el("div", { style: "font-weight:700;color:var(--text);margin-bottom:4px", text: "🔄 Lịch sử trạng thái (" + hist.length + ")" }),
@@ -73,9 +142,105 @@
     if (hist.length === 0) histEl.append(el("div", { text: "(chưa có thay đổi)" }));
     else [...hist].reverse().forEach((h) => {
       const when = new Date(h.at).toLocaleString("vi-VN");
-      const label = h.from == null ? `Tạo ở "${colName(h.to)}"` : `"${colName(h.from)}" → "${colName(h.to)}"`;
+      const label = h.from == null
+        ? `Tạo ở "${columnName(h.to)}"`
+        : `"${columnName(h.from)}" → "${columnName(h.to)}"`;
       histEl.append(el("div", { text: `${when} · ${label}` }));
     });
+
+    // ----- VIỆC CON (subtask) -----
+    const subWrap = el("div", { class: "field" });
+    function renderSubs() {
+      subWrap.innerHTML = "";
+      const fresh = Store.get("todos").find((x) => x.id === task.id);
+      const subs = (fresh && fresh.subtasks) || [];
+      const doneCount = subs.filter((s) => s.done).length;
+      subWrap.append(el("label", { text: "🧩 Việc con" + (subs.length ? ` (${doneCount}/${subs.length})` : "") }));
+
+      if (subs.length) {
+        const bar = el("div", { class: "progress", style: "margin-bottom:8px" }, [
+          el("div", { class: "progress__bar", style: `--pct:${Math.round((doneCount / subs.length) * 100)}%` }),
+        ]);
+        subWrap.append(bar);
+        const list = el("div", {});
+        subs.forEach((s) => {
+          const cb = el("input", { type: "checkbox", class: "check" });
+          cb.checked = !!s.done;
+          cb.addEventListener("change", () => {
+            Store.update((d) => {
+              const t = d.todos.find((x) => x.id === task.id);
+              const ss = t && t.subtasks.find((x) => x.id === s.id);
+              if (ss) ss.done = cb.checked;
+            });
+            renderSubs();
+          });
+          const txt = el("span", { class: "subtask__text", text: s.text });
+          const del = el("button", { class: "icon-btn", text: "✕", title: "Xóa việc con" });
+          del.addEventListener("click", () => {
+            Store.update((d) => {
+              const t = d.todos.find((x) => x.id === task.id);
+              if (t) t.subtasks = t.subtasks.filter((x) => x.id !== s.id);
+            });
+            renderSubs();
+          });
+          list.append(el("div", { class: "subtask" + (s.done ? " done" : "") }, [cb, txt, del]));
+        });
+        subWrap.append(list);
+      }
+
+      const inp = el("input", { class: "input", placeholder: "Thêm việc con...", maxlength: "200" });
+      const addB = el("button", { class: "btn btn--sm", text: "Thêm" });
+      function addSub() {
+        const v = inp.value.trim();
+        if (!v) return;
+        Store.update((d) => {
+          const t = d.todos.find((x) => x.id === task.id);
+          if (t) (t.subtasks = t.subtasks || []).push({ id: U.uid(), text: v, done: false });
+        });
+        inp.value = "";
+        renderSubs();
+      }
+      addB.addEventListener("click", addSub);
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") addSub(); });
+      subWrap.append(el("div", { class: "row", style: "margin-top:8px" }, [inp, el("div", { style: "flex:0 0 auto" }, [addB])]));
+    }
+    renderSubs();
+
+    // ----- LIÊN KẾT MỤC TIÊU -----
+    const goalWrap = el("div", { class: "field" });
+    function renderGoal() {
+      goalWrap.innerHTML = "";
+      goalWrap.append(el("label", { text: "🎯 Mục tiêu liên kết" }));
+      const g = getTaskGoal(task.id);
+      if (g) {
+        const openB = el("button", { class: "tag tag--ok tag--btn", title: "Mở mục tiêu", text: "🎯 " + g.title + " ↗" });
+        openB.addEventListener("click", () => {
+          // Đóng modal trước khi chuyển tab
+          const modal = document.querySelector(".modal");
+          if (modal) modal.remove();
+          App.go("goals");
+        });
+        const unlink = el("button", { class: "btn btn--sm btn--ghost", text: "⛓️‍💥 Bỏ liên kết" });
+        unlink.addEventListener("click", () => {
+          Store.update((d) => {
+            (d.goals || []).forEach((gg) => {
+              gg.subtasks = (gg.subtasks || []).filter((s) => s.taskId !== task.id);
+            });
+          });
+          App.log("goal_unlink", "Bỏ liên kết mục tiêu khỏi: " + task.text);
+          renderGoal();
+        });
+        goalWrap.append(el("div", { class: "row", style: "margin-top:8px" }, [
+          el("div", { style: "flex:0 0 auto" }, [openB]),
+          el("div", { style: "flex:0 0 auto" }, [unlink]),
+        ]));
+      } else {
+        const linkB = el("button", { class: "btn btn--sm btn--ghost", text: "🔗 Liên kết với một mục tiêu" });
+        linkB.addEventListener("click", () => pickGoal(task, renderGoal));
+        goalWrap.append(el("div", { style: "margin-top:8px" }, [linkB]));
+      }
+    }
+    renderGoal();
 
     const saveBtn = el("button", { class: "btn", text: "Lưu" });
     const delBtn = el("button", { class: "btn btn--danger", text: "Xóa" });
@@ -88,9 +253,14 @@
         el("div", { class: "field", style: "margin:0" }, [el("label", { text: "Ưu tiên" }), pri]),
       ]),
       el("div", { class: "field" }, [el("label", { text: "Thời gian hoàn thành dự kiến" }), due]),
+      subWrap,
+      goalWrap,
       info,
       histEl,
-      el("div", { class: "row", style: "margin-top:10px" }, [el("div", { style: "flex:0 0 auto" }, [saveBtn]), el("div", { style: "flex:0 0 auto" }, [delBtn])]),
+      el("div", { class: "row", style: "margin-top:10px" }, [
+        el("div", { style: "flex:0 0 auto" }, [saveBtn]),
+        el("div", { style: "flex:0 0 auto" }, [delBtn]),
+      ]),
     ]);
 
     const m = U.modal({ title: "Chi tiết công việc", body });
@@ -106,9 +276,9 @@
         t.priority = pri.value;
         t.due = due.value || null;
         if (t.columnId !== colSel.value) {
-          const fromName = (d.taskColumns.find((x) => x.id === t.columnId) || {}).name || "?";
+          const fromName = columnName(t.columnId);
           applyColumn(d, t, colSel.value);
-          const toName = (d.taskColumns.find((x) => x.id === colSel.value) || {}).name || "?";
+          const toName = columnName(colSel.value);
           moveDetail = `"${t.text}": ${fromName} → ${toName}`;
         }
       });
@@ -131,9 +301,9 @@
     Store.update((d) => {
       const t = d.todos.find((x) => x.id === taskId);
       if (!t) return;
-      const fromName = (d.taskColumns.find((x) => x.id === t.columnId) || {}).name || "?";
+      const fromName = columnName(t.columnId);
       applyColumn(d, t, colId);
-      const toName = (d.taskColumns.find((x) => x.id === colId) || {}).name || "?";
+      const toName = columnName(colId);
       detail = `"${t.text}": ${fromName} → ${toName}`;
     });
     App.log("task_move", detail);
@@ -191,7 +361,6 @@
 
     // ---- Thanh công cụ: layout + bộ lọc ----
     layout = Store.get("settings").taskLayout || "board";
-    const colOf = (id) => db.taskColumns.find((c) => c.id === id);
 
     const addColBtn = el("button", { class: "btn btn--ghost", text: "＋ Thêm cột" });
     addColBtn.addEventListener("click", () => {
@@ -291,7 +460,7 @@
       if (!rows.length) { content.append(el("p", { class: "empty", text: "Không có công việc phù hợp." })); return; }
       const list = el("ul", { class: "list" });
       rows.forEach((t) => {
-        const col = colOf(t.columnId);
+        const col = db.taskColumns.find((c) => c.id === t.columnId);
         const textEl = el("span", { class: "item__text", text: t.text, style: "cursor:pointer" });
         textEl.addEventListener("click", () => openDetail(t, root));
         list.append(el("li", { class: "item" + (t.done || t.cancelledAt ? " done" : "") }, [
