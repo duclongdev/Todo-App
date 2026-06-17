@@ -9,7 +9,9 @@
     med: { label: "Vừa", cls: "tag--med" },
     low: { label: "Thấp", cls: "tag--low" },
   };
-  const KIND_MARK = { done: " ✓", cancel: " ✕", pending: " ⏸", doing: " ▶" };
+  const KIND_MARK = { plan: " 💡", done: " ✓", cancel: " ✕", pending: " ⏸", doing: " ▶" };
+  let layout = "board"; // board | list | table
+  let filter = { priority: "all", status: "all", due: "all" };
 
   function fmtDateTime(v) {
     if (!v) return "";
@@ -144,7 +146,7 @@
     root.append(
       el("div", { class: "page-head" }, [
         el("h2", { text: "✅ Công việc" }),
-        el("p", { text: "Bảng Kanban — kéo công việc qua các cột, thêm cột tùy ý, tìm kiếm và theo dõi thời gian hoàn thành." }),
+        el("p", { text: "Kéo–thả qua các cột, nhiều kiểu hiển thị (Bảng / Danh sách / Bảng kê), lọc & theo dõi thời gian." }),
       ])
     );
 
@@ -187,9 +189,10 @@
       ])
     );
 
-    // ---- Tìm kiếm + thêm cột ----
-    const search = el("input", { class: "input", placeholder: "🔍 Tìm theo tên công việc...", value: query });
-    search.addEventListener("input", () => { query = search.value; renderBoard(); search.focus(); });
+    // ---- Thanh công cụ: layout + bộ lọc ----
+    layout = Store.get("settings").taskLayout || "board";
+    const colOf = (id) => db.taskColumns.find((c) => c.id === id);
+
     const addColBtn = el("button", { class: "btn btn--ghost", text: "＋ Thêm cột" });
     addColBtn.addEventListener("click", () => {
       const name = prompt("Tên cột mới:");
@@ -198,23 +201,144 @@
       App.log("column_add", "Thêm cột: " + name.trim());
       render(root);
     });
-    root.append(
-      el("div", { class: "row", style: "margin:16px 0" }, [search, el("div", { style: "flex:0 0 auto" }, [addColBtn])])
-    );
 
-    const boardWrap = el("div");
-    root.append(boardWrap);
+    // Chọn layout
+    function segBtn(id, label) {
+      const b = el("button", { class: "seg__btn" + (layout === id ? " is-active" : ""), text: label });
+      b.addEventListener("click", () => { Store.update((d) => (d.settings.taskLayout = id)); layout = id; render(root); });
+      return b;
+    }
+    const layoutSeg = el("div", { class: "seg" }, [segBtn("board", "▦ Bảng"), segBtn("list", "☰ Danh sách"), segBtn("table", "▤ Bảng kê")]);
 
+    // Bộ lọc
+    const search = el("input", { id: "task-q", class: "input", placeholder: "🔍 Tìm theo tên...", value: query });
+    search.addEventListener("input", () => {
+      query = search.value; renderContent();
+      requestAnimationFrame(() => { const n = document.getElementById("task-q"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } });
+    });
+    const fPri = el("select", { class: "select" }, [["all", "Mọi ưu tiên"], ["high", "Ưu tiên cao"], ["med", "Ưu tiên vừa"], ["low", "Ưu tiên thấp"]].map(([v, t]) => el("option", { value: v, text: t, selected: filter.priority === v })));
+    fPri.value = filter.priority;
+    fPri.addEventListener("change", () => { filter.priority = fPri.value; renderContent(); });
+    const fStatus = el("select", { class: "select" }, [el("option", { value: "all", text: "Mọi trạng thái" }), ...db.taskColumns.map((c) => el("option", { value: c.id, text: c.name, selected: filter.status === c.id }))]);
+    fStatus.value = filter.status;
+    fStatus.addEventListener("change", () => { filter.status = fStatus.value; renderContent(); });
+    const fDue = el("select", { class: "select" }, [["all", "Mọi hạn"], ["overdue", "Quá hạn"], ["today", "Hôm nay"], ["has", "Có hạn"], ["none", "Không hạn"]].map(([v, t]) => el("option", { value: v, text: t, selected: filter.due === v })));
+    fDue.value = filter.due;
+    fDue.addEventListener("change", () => { filter.due = fDue.value; renderContent(); });
+    const clearBtn = el("button", { class: "btn btn--sm btn--ghost", text: "Xóa lọc", onClick: () => { query = ""; filter = { priority: "all", status: "all", due: "all" }; render(root); } });
+
+    root.append(el("div", { class: "card" }, [
+      el("div", { class: "row", style: "align-items:center" }, [el("div", { style: "flex:0 0 auto" }, [layoutSeg]), search, el("div", { style: "flex:0 0 auto" }, [addColBtn])]),
+      el("div", { class: "row", style: "margin-top:10px" }, [fPri, fStatus, fDue, el("div", { style: "flex:0 0 auto;display:flex;align-items:flex-end" }, [clearBtn])]),
+    ]));
+
+    const content = el("div");
+    root.append(content);
+
+    // Lọc 1 công việc theo bộ lọc hiện tại
+    function passFilter(t) {
+      if (query.trim() && !t.text.toLowerCase().includes(query.trim().toLowerCase())) return false;
+      if (filter.priority !== "all" && t.priority !== filter.priority) return false;
+      if (filter.status !== "all" && t.columnId !== filter.status) return false;
+      if (filter.due !== "all") {
+        const has = !!t.due;
+        if (filter.due === "none" && has) return false;
+        if (filter.due === "has" && !has) return false;
+        if (filter.due === "overdue") { if (!has || t.done || t.cancelledAt || new Date(t.due) >= new Date()) return false; }
+        if (filter.due === "today") { if (!has) return false; if (new Date(t.due).toDateString() !== new Date().toDateString()) return false; }
+      }
+      return true;
+    }
+    const ORDER = { high: 0, med: 1, low: 2 };
+    function sortedFiltered() {
+      const colIndex = {}; db.taskColumns.forEach((c, i) => (colIndex[c.id] = i));
+      return db.todos.filter(passFilter).sort((a, b) => (colIndex[a.columnId] - colIndex[b.columnId]) || (ORDER[a.priority] - ORDER[b.priority]));
+    }
+
+    function renderContent() {
+      content.innerHTML = "";
+      if (layout === "list") renderList();
+      else if (layout === "table") renderTable();
+      else renderBoard();
+    }
+
+    // Select chuyển cột (dùng cho list/table)
+    function moveSelect(t, extraStyle) {
+      const m = el("select", { class: "tcard__move", style: extraStyle || "" }, db.taskColumns.map((c) => el("option", { value: c.id, text: c.name, selected: c.id === t.columnId })));
+      m.value = t.columnId;
+      m.addEventListener("change", () => moveTask(t.id, m.value, root));
+      return m;
+    }
+    function delBtn(t) {
+      const b = el("button", { class: "icon-btn", text: "✕", title: "Xóa" });
+      b.addEventListener("click", () => { Store.update((d) => (d.todos = d.todos.filter((x) => x.id !== t.id))); App.log("task_delete", "Xóa công việc: " + t.text); render(root); });
+      return b;
+    }
+    function metaTags(t) {
+      const m = [];
+      const p = PRI[t.priority];
+      if (p) m.push(el("span", { class: "tag " + p.cls, text: p.label }));
+      if (t.due) { const overdue = !t.done && !t.cancelledAt && new Date(t.due) < new Date(); m.push(el("span", { class: "tag", text: "🎯 " + fmtDateTime(t.due), style: overdue ? "color:var(--danger)" : "" })); }
+      if (t.completedAt) m.push(el("span", { class: "tag tag--ok", text: "✓ " + fmtDateTime(t.completedAt) }));
+      if (t.cancelledAt) m.push(el("span", { class: "tag tag--high", text: "✕" }));
+      if (t.description) m.push(el("span", { class: "tag", text: "📝" }));
+      return m;
+    }
+
+    // -------- LAYOUT: DANH SÁCH --------
+    function renderList() {
+      const rows = sortedFiltered();
+      if (!rows.length) { content.append(el("p", { class: "empty", text: "Không có công việc phù hợp." })); return; }
+      const list = el("ul", { class: "list" });
+      rows.forEach((t) => {
+        const col = colOf(t.columnId);
+        const textEl = el("span", { class: "item__text", text: t.text, style: "cursor:pointer" });
+        textEl.addEventListener("click", () => openDetail(t, root));
+        list.append(el("li", { class: "item" + (t.done || t.cancelledAt ? " done" : "") }, [
+          el("span", { class: "badge", text: col ? col.name : "?" }),
+          textEl,
+          ...metaTags(t),
+          moveSelect(t, "flex:0 0 130px"),
+          delBtn(t),
+        ]));
+      });
+      content.append(list);
+    }
+
+    // -------- LAYOUT: BẢNG KÊ --------
+    function renderTable() {
+      const rows = sortedFiltered();
+      if (!rows.length) { content.append(el("p", { class: "empty", text: "Không có công việc phù hợp." })); return; }
+      const table = el("table", { class: "table" });
+      table.append(el("thead", {}, el("tr", {}, [
+        el("th", { text: "Công việc" }), el("th", { text: "Trạng thái" }), el("th", { text: "Ưu tiên" }),
+        el("th", { text: "Hạn" }), el("th", { text: "Hoàn thành" }), el("th", { text: "" }),
+      ])));
+      const tbody = el("tbody");
+      rows.forEach((t) => {
+        const p = PRI[t.priority];
+        const nameEl = el("span", { text: t.text, style: "cursor:pointer;" + (t.done || t.cancelledAt ? "color:var(--muted);text-decoration:line-through" : "") });
+        nameEl.addEventListener("click", () => openDetail(t, root));
+        tbody.append(el("tr", {}, [
+          el("td", {}, [nameEl, t.description ? el("span", { text: " 📝" }) : null]),
+          el("td", {}, moveSelect(t, "max-width:140px")),
+          el("td", {}, p ? el("span", { class: "tag " + p.cls, text: p.label }) : null),
+          el("td", { class: "table__time", text: t.due ? fmtDateTime(t.due) : "—" }),
+          el("td", { class: "table__time", text: t.completedAt ? fmtDateTime(t.completedAt) : (t.cancelledAt ? "Đã hủy" : "—") }),
+          el("td", {}, delBtn(t)),
+        ]));
+      });
+      table.append(tbody);
+      content.append(el("div", { style: "overflow-x:auto" }, [table]));
+    }
+
+    // -------- LAYOUT: BẢNG KANBAN --------
     function renderBoard() {
-      boardWrap.innerHTML = "";
-      const q = query.trim().toLowerCase();
       const board = el("div", { class: "board" });
 
       db.taskColumns.forEach((col, idx) => {
-        let cards = db.todos.filter((t) => t.columnId === col.id);
-        if (q) cards = cards.filter((t) => t.text.toLowerCase().includes(q));
-        const order = { high: 0, med: 1, low: 2 };
-        cards = [...cards].sort((a, b) => order[a.priority] - order[b.priority]);
+        let cards = db.todos.filter((t) => t.columnId === col.id && passFilter(t));
+        cards = [...cards].sort((a, b) => ORDER[a.priority] - ORDER[b.priority]);
 
         const colEl = el("div", { class: "column", dataset: { colid: col.id } });
 
@@ -285,7 +409,7 @@
       addCol.addEventListener("click", () => addColBtn.click());
       board.append(addCol);
 
-      boardWrap.append(board);
+      content.append(board);
     }
 
     function taskCard(t, colIdx) {
@@ -340,7 +464,7 @@
       return card;
     }
 
-    renderBoard();
+    renderContent();
   }
 
   function colField(label, control) {

@@ -31,6 +31,7 @@ window.Store = (function () {
   function defaultDB() {
     return {
       taskColumns: [
+        { id: "plan", name: "Ý tưởng", kind: "plan" },
         { id: "todo", name: "Cần làm", kind: "todo" },
         { id: "doing", name: "Đang làm", kind: "doing" },
         { id: "pending", name: "Tạm hoãn", kind: "pending" },
@@ -56,8 +57,15 @@ window.Store = (function () {
       db.taskColumns = defaultDB().taskColumns;
     // Gán "kind" cho cột cũ
     db.taskColumns.forEach((c) => {
-      if (!c.kind) c.kind = c.isDone ? "done" : (["todo", "doing", "pending", "cancel"].includes(c.id) ? c.id : "custom");
+      if (!c.kind) c.kind = c.isDone ? "done" : (["plan", "todo", "doing", "pending", "cancel"].includes(c.id) ? c.id : "custom");
     });
+    // Bổ sung 1 lần trạng thái Plan (Ý tưởng) ở đầu bảng
+    if (!db._taskColsV3) {
+      if (!db.taskColumns.some((c) => c.kind === "plan")) {
+        db.taskColumns.unshift({ id: "plan", name: "Ý tưởng", kind: "plan" });
+      }
+      db._taskColsV3 = true;
+    }
     // Bổ sung 1 lần 2 trạng thái mới: Tạm hoãn & Đã hủy
     if (!db._taskColsV2) {
       const doneIdx = db.taskColumns.findIndex((c) => c.isDone);
