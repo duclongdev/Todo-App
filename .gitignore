@@ -7,3 +7,8 @@ life-hub-data*.json
 Thumbs.db
 .vscode/
 .claude/
+
+# Node / Vite (React)
+node_modules/
+dist/
+*.local

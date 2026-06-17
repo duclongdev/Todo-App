@@ -1,62 +1,12 @@
 <!DOCTYPE html>
 <html lang="vi" data-theme="light">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Life Hub</title>
-  <link rel="stylesheet" href="styles.css?v=20260617c" />
-</head>
-<body>
-  <div class="layout" id="layout">
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <span class="brand__logo">🌱</span>
-        <span class="brand__name">Life Hub</span>
-      </div>
-      <nav class="nav" id="nav"></nav>
-      <div class="sidebar__foot">
-        <button class="theme-toggle" id="theme-toggle" title="Đổi giao diện">🌙</button>
-        <span class="build-tag" title="Phiên bản bản dựng">build 20260617c</span>
-      </div>
-    </aside>
-
-    <div class="content">
-      <!-- Top header (luôn hiển thị) -->
-      <header class="topbar">
-        <button class="topbar__menu" id="menu-btn" aria-label="Thu gọn menu" title="Thu gọn / mở menu">☰</button>
-        <span class="topbar__title" id="topbar-title">Tổng quan</span>
-        <div class="topbar__right">
-          <span class="clock" id="clock"></span>
-          <button class="theme-toggle" id="theme-toggle-m" title="Đổi giao diện">🌙</button>
-        </div>
-      </header>
-
-      <!-- Main view -->
-      <main class="main" id="view"></main>
-    </div>
-  </div>
-
-  <div class="backdrop" id="backdrop"></div>
-  <div class="toast-wrap" id="toast-wrap"></div>
-
-  <!-- Core -->
-  <script src="js/utils.js?v=20260617c"></script>
-  <script src="js/store.js?v=20260617c"></script>
-  <script src="js/filesync.js?v=20260617c"></script>
-  <!-- Views -->
-  <script src="js/dashboard.js?v=20260617c"></script>
-  <script src="js/tasks.js?v=20260617c"></script>
-  <script src="js/habits.js?v=20260617c"></script>
-  <script src="js/goals.js?v=20260617c"></script>
-  <script src="js/finance.js?v=20260617c"></script>
-  <script src="js/sleep.js?v=20260617c"></script>
-  <script src="js/focus.js?v=20260617c"></script>
-  <script src="js/journal.js?v=20260617c"></script>
-  <script src="js/notes.js?v=20260617c"></script>
-  <script src="js/stats.js?v=20260617c"></script>
-  <script src="js/settings.js?v=20260617c"></script>
-  <!-- App last -->
-  <script src="js/app.js?v=20260617c"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Life Hub</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
 </html>
