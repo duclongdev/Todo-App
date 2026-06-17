@@ -1,0 +1,9 @@
+# Dữ liệu cá nhân của app (file đồng bộ .json + file tạm của trình duyệt)
+life-hub-data*.json
+*.crswap
+
+# Hệ điều hành / editor / công cụ
+.DS_Store
+Thumbs.db
+.vscode/
+.claude/
